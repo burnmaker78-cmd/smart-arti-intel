@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart AI Chat</title>
+  <!-- CORRECTED: Tailwind CSS loaded via cdn.jsdelivr.net -->
+  <script src="https://jsdelivr.net"></script>
+  <!-- Load Lucide Icons via CDN -->
+  <script src="https://unpkg.com"></script>
+</head>
+<body class="bg-white text-black font-sans antialiased">
+
+  <div class="flex flex-col h-screen max-w-2xl mx-auto p-4 justify-between">
+    
+    <!-- API Key Input Section -->
+    <div class="flex items-center gap-2 p-2 border border-yellow-300 bg-yellow-50 rounded-lg mb-4">
+      <i data-lucide="key" class="text-yellow-600 w-5 h-5"></i>
+      <input
+        type="password"
+        id="apiKeyInput"
+        placeholder="Paste OpenAI API Key here (stored only in browser)..."
+        class="flex-1 text-xs p-1 bg-transparent focus:outline-none text-black"
+      />
+    </div>
+
+    <!-- Chat Messages Window -->
+    <div id="chatWindow" class="flex-1 overflow-y-auto space-y-4 mb-4 p-4 border border-gray-200 rounded-lg bg-gray-50 flex flex-col">
+      <p id="placeholderText" class="text-gray-400 text-center mt-10">Paste your API key, attach images/files, and talk to the AI!</p>
+    </div>
+
+    <!-- Interactive Input Panel -->
+    <form id="chatForm" class="space-y-2">
+      <!-- File Attachments Preview Bar -->
+      <div id="attachmentPreview" class="hidden flex gap-2 flex-wrap p-2 border border-dashed border-gray-300 rounded-md bg-white"></div>
+
+      <div class="flex items-center gap-2">
+        <!-- Hidden Native File Input -->
+        <input type="file" id="fileInput" class="hidden" multiple accept="image/*,application/pdf,text/*">
+        
+        <!-- Chain Button -->
+        <button type="button" id="chainBtn" class="p-3 bg-gray-100 hover:bg-gray-200 rounded-lg text-gray-600 transition" title="Link files or images">
+          <i data-lucide="paperclip" class="w-5 h-5"></i>
+        </button>
+
+        <!-- Text input field -->
+        <input
+          type="text"
+          id="textPrompt"
+          class="flex-1 p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-black"
+          placeholder="Ask me something intelligent..."
+        />
+        
+        <!-- Send button -->
+        <button type="submit" class="p-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition">
+          <i data-lucide="send" class="w-5 h-5"></i>
+        </button>
+      </div>
+    </form>
+  </div>
+
+  <script>
+    // Initialize Lucide Icons
+    lucide.createIcons();
+
+    const chatWindow = document.getElementById('chatWindow');
+    const placeholderText = document.getElementById('placeholderText');
+    const chatForm = document.getElementById('chatForm');
+    const textPrompt = document.getElementById('textPrompt');
+    const apiKeyInput = document.getElementById('apiKeyInput');
+    const fileInput = document.getElementById('fileInput');
+    const chainBtn = document.getElementById('chainBtn');
+    const attachmentPreview = document.getElementById('attachmentPreview');
+
+    let attachedFiles = [];
+    let messages = [];
+
+    // Trigger file dialog on Chain Click
+    chainBtn.addEventListener('click', () => fileInput.click());
+
+    // Read files dynamically into memory
+    fileInput.addEventListener('change', (e) => {
+      Array.from(e.target.files).forEach(file => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          attachedFiles.push({ name: file.name, url: reader.result, type: file.type });
+          renderPreviews();
+        };
+        reader.readAsDataURL(file);
+      });
+    });
+
+    function renderPreviews() {
+      if (attachedFiles.length > 0) {
+        attachmentPreview.classList.remove('hidden');
+        attachmentPreview.innerHTML = attachedFiles.map(f => `
+          <span class="bg-gray-200 text-xs px-2 py-1 rounded text-gray-700 max-w-[150px] truncate">
+            📎 ${f.name}
+          </span>
+        `).join('');
+      } else {
+        attachmentPreview.classList.add('hidden');
+      }
+    }
+
+    function appendMessage(role, content) {
+      if (placeholderText) placeholderText.remove();
+      
+      const msgDiv = document.createElement('div');
+      msgDiv.className = `p-3 rounded-lg max-w-[80%] ${role === 'user' ? 'bg-blue-600 text-white align-self-end ml-auto' : 'bg-white text-gray-800 border border-gray-300 align-self-start'}`;
+      msgDiv.innerText = content;
+      
+      chatWindow.appendChild(msgDiv);
+      chatWindow.scrollTop = chatWindow.scrollHeight;
+    }
+
+    // Submit Prompt to OpenAI API directly from browser
+    chatForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const prompt = textPrompt.value.trim();
+      const apiKey = apiKeyInput.value.trim();
+
+      if (!prompt && attachedFiles.length === 0) return;
+      if (!apiKey) {
+        alert('Please paste your OpenAI API key at the top first!');
+        return;
+      }
+
+      appendMessage('user', prompt);
+      textPrompt.value = '';
+
+      // Format payload for AI text + vision engine
+      let contentPayload = [{ type: "text", text: prompt }];
+      attachedFiles.forEach(file => {
+        if (file.type.startsWith('image/')) {
+          contentPayload.push({ type: "image_url", image_url: { url: file.url } });
+        } else {
+          contentPayload.push({ type: "text", text: `[Attached Document Context: ${file.name}]` });
+        }
+      });
+
+      messages.push({ role: 'user', content: contentPayload });
+      attachedFiles = [];
+      renderPreviews();
+
+      // Show loader
+      const loader = document.createElement('p');
+      loader.className = "text-xs text-gray-400 italic animate-pulse";
+      loader.id = "aiLoader";
+      loader.innerText = "Thinking intelligently...";
+      chatWindow.appendChild(loader);
+
+      try {
+        const response = await fetch('https://openai.com', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            model: 'gpt-4o', // Smart AI engine capable of reading text and attached files
+            messages: messages
+          })
+        });
+
+        const data = await response.json();
+        loader.remove();
+
+        if (data.choices && data.choices[0]) {
+          const reply = data.choices[0].message.content;
+          messages.push({ role: 'assistant', content: reply });
+          appendMessage('assistant', reply);
+        } else {
+          alert('Error: Check your key balance or format.');
+        }
+      } catch (err) {
+        loader.remove();
+        alert('Failed to connect to AI.');
+        console.error(err);
+      }
+    });
+  </script>
+</body>
+</html>
